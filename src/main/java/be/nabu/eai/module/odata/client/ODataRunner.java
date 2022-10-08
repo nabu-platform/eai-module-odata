@@ -119,8 +119,10 @@ public class ODataRunner {
 			DefaultHTTPRequest request = new DefaultHTTPRequest(function.getMethod(), target, part);
 			
 			if (client.getConfig().getSecurityType() != null) {
-				HTTPRequestAuthenticatorFactory.getInstance().getAuthenticator(client.getConfig().getSecurityType())
-					.authenticate(request, client.getConfig().getSecurityContext(), null, false);
+				if (!HTTPRequestAuthenticatorFactory.getInstance().getAuthenticator(client.getConfig().getSecurityType())
+					.authenticate(request, client.getConfig().getSecurityContext(), null, false)) {
+					throw new IllegalStateException("Could not authenticate the request");
+				}
 			}
 			HTTPClient client = Services.getTransactionable(ServiceRuntime.getRuntime().getExecutionContext(), transactionId == null ? null : transactionId.toString(), this.client.getConfig().getHttpClient()).getClient();
 			HTTPResponse response = client.execute(request, null, "https".equals(definition.getScheme()), true);
