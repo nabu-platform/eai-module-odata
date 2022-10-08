@@ -13,9 +13,12 @@ import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.managers.base.JAXBArtifactManager;
 import be.nabu.eai.repository.resources.MemoryEntry;
 import be.nabu.libs.artifacts.api.Artifact;
+import be.nabu.libs.odata.ODataDefinition;
+import be.nabu.libs.odata.types.Function;
 import be.nabu.libs.resources.api.ResourceContainer;
-import be.nabu.utils.odata.ODataDefinition;
-import be.nabu.utils.odata.types.Function;
+import be.nabu.libs.types.api.ComplexType;
+import be.nabu.libs.types.api.DefinedType;
+import be.nabu.libs.types.api.SimpleType;
 
 public class ODataClientManager extends JAXBArtifactManager<ODataClientConfiguration, ODataClient> implements ArtifactRepositoryManager<ODataClient> {
 
@@ -28,7 +31,8 @@ public class ODataClientManager extends JAXBArtifactManager<ODataClientConfigura
 		List<Entry> entries = new ArrayList<Entry>();
 		((EAINode) root.getNode()).setLeaf(false);
 		List<String> operationIds = artifact.getConfig().getOperationIds();
-		boolean showAll = false;
+		List<String> usedTypes = new ArrayList<String>();
+		boolean showAll = true;
 		if (operationIds != null || showAll) {
 			ODataDefinition definition = artifact.getDefinition();
 			List<Function> functions = definition.getFunctions();
@@ -38,6 +42,22 @@ public class ODataClientManager extends JAXBArtifactManager<ODataClientConfigura
 					if (showAll || operationIds.indexOf(operationId) >= 0) {
 						ODataClientService child = new ODataClientService(root.getId() + ".services." + operationId, artifact, function);
 						addChild(root, artifact, entries, child);
+					}
+				}
+			}
+		}
+		for (String namespace : artifact.getDefinition().getRegistry().getNamespaces()) {
+			for (ComplexType type : artifact.getDefinition().getRegistry().getComplexTypes(namespace)) {
+				if (type instanceof DefinedType) {
+					if (showAll || usedTypes.contains(((DefinedType) type).getId())) {
+						addChild(root, artifact, entries, (DefinedType) type);
+					}
+				}
+			}
+			for (SimpleType<?> type : artifact.getDefinition().getRegistry().getSimpleTypes(namespace)) {
+				if (type instanceof DefinedType) {
+					if (showAll || usedTypes.contains(((DefinedType) type).getId())) {
+						addChild(root, artifact, entries, (DefinedType) type);
 					}
 				}
 			}

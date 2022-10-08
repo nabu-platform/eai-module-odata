@@ -10,12 +10,16 @@ import java.util.Set;
 import be.nabu.libs.artifacts.ExternalDependencyImpl;
 import be.nabu.libs.artifacts.api.ExternalDependency;
 import be.nabu.libs.artifacts.api.ExternalDependencyArtifact;
+import be.nabu.libs.odata.ODataDefinition;
+import be.nabu.libs.odata.types.Function;
 import be.nabu.libs.services.api.DefinedService;
+import be.nabu.libs.services.api.ExecutionContext;
+import be.nabu.libs.services.api.Service;
+import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceInstance;
 import be.nabu.libs.services.api.ServiceInterface;
+import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
-import be.nabu.utils.odata.ODataDefinition;
-import be.nabu.utils.odata.types.Function;
 
 public class ODataClientService implements DefinedService, ExternalDependencyArtifact {
 
@@ -50,8 +54,16 @@ public class ODataClientService implements DefinedService, ExternalDependencyArt
 
 	@Override
 	public ServiceInstance newInstance() {
-		// TODO Auto-generated method stub
-		return null;
+		return new ServiceInstance() {
+			@Override
+			public Service getDefinition() {
+				return ODataClientService.this;
+			}
+			@Override
+			public ComplexContent execute(ExecutionContext executionContext, ComplexContent input) throws ServiceException {
+				return new ODataRunner(client).run(function, input);
+			}
+		};
 	}
 
 	@Override

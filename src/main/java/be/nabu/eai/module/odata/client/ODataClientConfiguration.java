@@ -9,6 +9,8 @@ import javax.xml.bind.annotation.XmlRootElement;
 import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
 
 import be.nabu.eai.api.Advanced;
+import be.nabu.eai.api.ValueEnumerator;
+import be.nabu.eai.developer.impl.HTTPAuthenticatorEnumerator;
 import be.nabu.eai.module.http.client.HTTPClientArtifact;
 import be.nabu.eai.repository.jaxb.ArtifactXMLAdapter;
 import be.nabu.libs.types.api.annotation.Field;
@@ -20,6 +22,11 @@ public class ODataClientConfiguration {
 	private URI endpoint;
 	// the operation ids to expose!
 	private List<String> operationIds = new ArrayList<String>();
+	
+	// the type of the security needed (depends on whats available)
+	private String securityType;
+	// the security context within that type
+	private String securityContext;
 	
 	@Field(comment = "You can opt for using a specific http client, for example if you are working with self-signed certificates for internal infrastructure. If left empty, the default http client will be used.")
 	@Advanced
@@ -47,5 +54,18 @@ public class ODataClientConfiguration {
 	}
 	public void setOperationIds(List<String> operationIds) {
 		this.operationIds = operationIds;
+	}
+	@ValueEnumerator(enumerator = HTTPAuthenticatorEnumerator.class)
+	public String getSecurityType() {
+		return securityType;
+	}
+	public void setSecurityType(String securityType) {
+		this.securityType = securityType;
+	}
+	public String getSecurityContext() {
+		return securityContext;
+	}
+	public void setSecurityContext(String securityContext) {
+		this.securityContext = securityContext;
 	}
 }

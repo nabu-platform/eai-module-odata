@@ -119,6 +119,11 @@
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
+			<groupId>be.nabu.libs.types</groupId>
+			<artifactId>types-xml</artifactId>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
 			<groupId>be.nabu.libs.converter</groupId>
 			<artifactId>converter-api</artifactId>
 			<scope>provided</scope>
