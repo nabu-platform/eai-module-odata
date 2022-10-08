@@ -2,7 +2,10 @@ package be.nabu.eai.module.odata.client;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.Charset;
+import java.util.Arrays;
+import java.util.List;
 
+import be.nabu.eai.repository.util.Filter;
 import be.nabu.libs.http.HTTPException;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.HTTPClient;
@@ -11,7 +14,10 @@ import be.nabu.libs.http.core.HTTPRequestAuthenticatorFactory;
 import be.nabu.libs.odata.ODataDefinition;
 import be.nabu.libs.odata.types.Function;
 import be.nabu.libs.property.ValueUtils;
+import be.nabu.libs.property.api.Value;
 import be.nabu.libs.services.ServiceRuntime;
+import be.nabu.libs.services.jdbc.JDBCServiceInstance;
+import be.nabu.libs.services.jdbc.JDBCUtils;
 import be.nabu.libs.types.TypeUtils;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
@@ -22,8 +28,10 @@ import be.nabu.libs.types.binding.api.MarshallableBinding;
 import be.nabu.libs.types.binding.api.UnmarshallableBinding;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.json.JSONBinding;
+import be.nabu.libs.types.properties.ForeignNameProperty;
 import be.nabu.libs.types.properties.MaxOccursProperty;
 import be.nabu.libs.types.properties.PrimaryKeyProperty;
+import be.nabu.libs.types.properties.RestrictProperty;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.io.api.ByteBuffer;
 import be.nabu.utils.io.api.ReadableContainer;
@@ -75,6 +83,92 @@ public class ODataRunner {
 				}
 			}
 			
+			Integer limit = input == null ? null : (Integer) input.get("limit");
+			Long offset = input == null ? null : (Long) input.get("offset");
+			Boolean totalCount = input == null ? null : (Boolean) input.get("totalCount");
+			String search = input == null ? null : (String) input.get("search");
+			String filter = input == null ? null : (String) input.get("filter");
+			List<String> orderBy = input == null ? null : (List<String>) input.get("orderBy");
+			
+			boolean queryBegun = false;
+			if (limit != null) {
+				if (queryBegun) {
+					target += "&";
+				}
+				else {
+					queryBegun = true;
+					target += "?";
+				}
+				target += "$top=" + limit;
+			}
+			if (offset != null) {
+				if (queryBegun) {
+					target += "&";
+				}
+				else {
+					queryBegun = true;
+					target += "?";
+				}
+				target += "$skip=" + offset;
+			}
+			if (totalCount != null) {
+				if (queryBegun) {
+					target += "&";
+				}
+				else {
+					queryBegun = true;
+					target += "?";
+				}
+				target += "$count=" + totalCount;
+			}
+			if (search != null) {
+				if (queryBegun) {
+					target += "&";
+				}
+				else {
+					queryBegun = true;
+					target += "?";
+				}
+				target += "$search=" + search;
+			}
+			if (orderBy != null && !orderBy.isEmpty()) {
+				if (queryBegun) {
+					target += "&";
+				}
+				else {
+					queryBegun = true;
+					target += "?";
+				}
+				target += "$orderby=";
+				boolean first = true;
+				for (String single : orderBy) {
+					if (first) {
+						first = false;
+					}
+					else {
+						target += ",";
+					}
+					target += single;
+				}
+			}
+			// if you didn't set an explicit filter, you might have used the filters array
+			if (filter == null) {
+				List<Filter> filters = input == null ? null : (List<Filter>) input.get("filters");
+				if (filters != null && !filters.isEmpty()) {
+					filter = buildFilter(filters);
+				}
+			}
+			if (filter != null) {
+				if (queryBegun) {
+					target += "&";
+				}
+				else {
+					queryBegun = true;
+					target += "?";
+				}
+				target += "$filter=" + filter;
+			}
+				
 			Charset charset = client.getConfig().getCharset();
 			if (charset == null) {
 				charset = Charset.forName("UTF-8");
@@ -188,5 +282,185 @@ public class ODataRunner {
 		catch (Exception e) {
 			throw new RuntimeException(e);
 		}
+	}
+	
+	
+	// this is inspired by, copied from the jdbc code
+	
+	public static List<String> inputOperators = Arrays.asList("=", "<>", ">", "<", ">=", "<=", "like", "ilike");
+	// if we have boolean operators, we check if there is a value
+	// if it is true, we apply the filter, if it is false, we apply the inverse filter, if it is null, we skip the filter
+	// if there is no value, the filter is applied
+	// for CRUD this is enforced to be false currently by the crud code
+	private static boolean skipFilter(Filter filter) {
+		// if it is not a traditional comparison operator, we assume it is a boolean one
+		if (!inputOperators.contains(filter.getOperator()) && filter.getValues() != null && !filter.getValues().isEmpty()) {
+			Object object = filter.getValues().get(0);
+			if (object == null) {
+				return true;
+			}
+		}
+		return false;
+	}
+	private static boolean inverseFilter(Filter filter) {
+		if (!inputOperators.contains(filter.getOperator()) && filter.getValues() != null && !filter.getValues().isEmpty()) {
+			Object object = filter.getValues().get(0);
+			if (object instanceof Boolean && !(Boolean) object) {
+				return true;
+			}
+		}
+		return false;
+	}
+	private String buildFilter(List<Filter> filters) {
+		String where = "";
+		boolean openOr = false;
+		for (int i = 0; i < filters.size(); i++) {
+			Filter filter = filters.get(i);
+			if (filter.getKey() == null) {
+				continue;
+			}
+			
+			if (skipFilter(filter)) {
+				continue;
+			}
+			
+			if (!where.isEmpty()) {
+				if (filter.isOr()) {
+					where += " or";
+				}
+				else {
+					where += " and";
+				}
+			}
+			// start the or
+			if (i < filters.size() - 1 && !openOr && filters.get(i + 1).isOr()) {
+				where += " (";
+				openOr = true;
+			}
+			
+			boolean inverse = inverseFilter(filter);
+			String operator = filter.getOperator();
+			
+			if (filter.getValues() != null && filter.getValues().size() >= 2) {
+				if (operator.equals("=")) {
+					operator = "in";
+				}
+				else if (operator.equals("<>")) {
+					operator = "in";
+					inverse = true;
+				}
+			}
+			
+			if (inverse && operator.toLowerCase().equals("is null")) {
+				operator = "is not null";
+				inverse = false;
+			}
+			else if (inverse && operator.toLowerCase().equals("is not null")) {
+				operator = "is null";
+				inverse = false;
+			}
+			else if (inverse) {
+				where += " not(";
+			}
+			
+			if (operator.equals("like")) {
+				where += "contains(";
+			}
+			if (filter.isCaseInsensitive()) {
+				where += " tolower(" + filter.getKey() + ")";
+			}
+			else {
+				where += " " + filter.getKey();
+			}
+			where += " " + mapOperator(operator);
+			
+			if (filter.getValues() != null && !filter.getValues().isEmpty() && inputOperators.contains(operator)) {
+				if (filter.getValues().size() == 1) {
+					Object object = filter.getValues().get(0);
+					if (filter.isCaseInsensitive()) {
+						where += " tolower('" + object + "')";
+					}
+					else {
+						where += " " + (object instanceof String ? "'" + object + "'" : object);
+					}
+				}
+				else {
+					where += " (";
+					boolean first = true;
+					for (Object single : filter.getValues()) {
+						if (first) {
+							first = false;
+						}
+						else {
+							where += ", ";
+						}
+						if (filter.isCaseInsensitive()) {
+							where += " tolower('" + single + "')";
+						}
+						else {
+							where += " " + (single instanceof String ? "'" + single + "'" : single);
+						}
+					}
+					where += ")";
+				}
+			}
+			
+			if (operator.equals("like")) {
+				where += ")";
+			}
+			
+			// close the not statement
+			if (inverse) {
+				where += ")";
+			}
+			// check if we want to close an or
+			if (i < filters.size() - 1 && openOr && !filters.get(i + 1).isOr()) {
+				where += ")";
+				openOr = false;
+			}
+		}
+		if (openOr) {
+			where += ")";
+			openOr = false;
+		}
+		return where;
+	}
+	
+	private String mapOperator(String operator) {
+		if ("=".equals(operator)) {
+			return "eq";
+		}
+		else if ("!=".equals(operator) || "<>".equals(operator)) {
+			return "ne";
+		}
+		else if (">".equals(operator)) {
+			return "gt";
+		}
+		else if (">=".equals(operator)) {
+			return "ge";
+		}
+		else if ("<".equals(operator)) {
+			return "lt";
+		}
+		else if ("<=".equals(operator)) {
+			return "le";
+		}
+		else if ("&&".equals(operator)) {
+			return "and";
+		}
+		else if ("||".equals(operator)) {
+			return "or";
+		}
+		// we map the like to a contains() function! so we just need a separator
+		else if ("like".equals(operator)) {
+			return ",";
+		}
+		else if ("is null".equals(operator)) {
+			return "eq null";
+		}
+		else if ("is not null".equals(operator)) {
+			return "ne null";
+		}
+		return null;
 	}
 }

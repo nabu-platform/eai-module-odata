@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import be.nabu.eai.repository.util.Filter;
 import be.nabu.libs.artifacts.ExternalDependencyImpl;
 import be.nabu.libs.artifacts.api.ExternalDependency;
 import be.nabu.libs.artifacts.api.ExternalDependencyArtifact;
@@ -20,6 +21,12 @@ import be.nabu.libs.services.api.ServiceInstance;
 import be.nabu.libs.services.api.ServiceInterface;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
+import be.nabu.libs.types.base.ComplexElementImpl;
+import be.nabu.libs.types.base.ValueImpl;
+import be.nabu.libs.types.java.BeanResolver;
+import be.nabu.libs.types.properties.MaxOccursProperty;
+import be.nabu.libs.types.properties.MinOccursProperty;
+import be.nabu.libs.types.structure.Structure;
 
 public class ODataClientService implements DefinedService, ExternalDependencyArtifact {
 
@@ -47,7 +54,18 @@ public class ODataClientService implements DefinedService, ExternalDependencyArt
 			
 			@Override
 			public ComplexType getInputDefinition() {
-				return function.getInput();
+				ComplexType input = function.getInput();
+				// if we have the filter input, let's also support structured filters
+				if (input.get("filter") != null) {
+					Structure extended = new Structure();
+					extended.setName("input");
+					extended.setSuperType(input);
+					extended.add(new ComplexElementImpl("filters", (ComplexType) BeanResolver.getInstance().resolve(Filter.class), extended, 
+						new ValueImpl<Integer>(MinOccursProperty.getInstance(), 0),
+						new ValueImpl<Integer>(MaxOccursProperty.getInstance(), 0)));
+					input = extended;
+				}
+				return input;
 			}
 		};
 	}
