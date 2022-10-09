@@ -28,6 +28,8 @@ import be.nabu.libs.types.binding.api.MarshallableBinding;
 import be.nabu.libs.types.binding.api.UnmarshallableBinding;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.json.JSONBinding;
+import be.nabu.libs.types.java.BeanInstance;
+import be.nabu.libs.types.mask.MaskedContent;
 import be.nabu.libs.types.properties.ForeignNameProperty;
 import be.nabu.libs.types.properties.MaxOccursProperty;
 import be.nabu.libs.types.properties.PrimaryKeyProperty;
@@ -51,7 +53,7 @@ public class ODataRunner {
 		this.definition = client.getDefinition();
 	}
 	
-	@SuppressWarnings({ "rawtypes", "unchecked", "resource" })
+	@SuppressWarnings({ "rawtypes", "unchecked" })
 	public ComplexContent run(Function function, ComplexContent input) {
 		try {
 			Object transactionId = input == null ? null : input.get("transactionId");
@@ -315,7 +317,14 @@ public class ODataRunner {
 		String where = "";
 		boolean openOr = false;
 		for (int i = 0; i < filters.size(); i++) {
-			Filter filter = filters.get(i);
+			Object filterObject = filters.get(i);
+			if (filterObject instanceof MaskedContent) {
+				filterObject = ((MaskedContent) filterObject).getOriginal();
+			}
+			if (filterObject instanceof BeanInstance) {
+				filterObject = ((BeanInstance<?>) filterObject).getUnwrapped();
+			}
+			Filter filter = (Filter) filterObject;
 			if (filter.getKey() == null) {
 				continue;
 			}
@@ -377,6 +386,10 @@ public class ODataRunner {
 			if (filter.getValues() != null && !filter.getValues().isEmpty() && inputOperators.contains(operator)) {
 				if (filter.getValues().size() == 1) {
 					Object object = filter.getValues().get(0);
+					// for the like operator, we have probably injected "%" to indicate wildcards, remove those, there are no wildcards here
+					if (operator.equals("like")) {
+						object = object.toString().replace("%", "");
+					}
 					if (filter.isCaseInsensitive()) {
 						where += " tolower('" + object + "')";
 					}
