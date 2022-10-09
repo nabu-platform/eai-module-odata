@@ -20,8 +20,8 @@ public class ODataClientConfiguration {
 	private HTTPClientArtifact httpClient;
 	private Charset charset;
 	private URI endpoint;
-	// the operation ids to expose!
-	private List<String> operationIds = new ArrayList<String>();
+	// the entitySets to expose!
+	private List<String> entitySets = new ArrayList<String>();
 	
 	// the type of the security needed (depends on whats available)
 	private String securityType;
@@ -49,11 +49,11 @@ public class ODataClientConfiguration {
 	public void setEndpoint(URI endpoint) {
 		this.endpoint = endpoint;
 	}
-	public List<String> getOperationIds() {
-		return operationIds;
+	public List<String> getEntitySets() {
+		return entitySets;
 	}
-	public void setOperationIds(List<String> operationIds) {
-		this.operationIds = operationIds;
+	public void setEntitySets(List<String> entitySets) {
+		this.entitySets = entitySets;
 	}
 	@ValueEnumerator(enumerator = HTTPAuthenticatorEnumerator.class)
 	public String getSecurityType() {

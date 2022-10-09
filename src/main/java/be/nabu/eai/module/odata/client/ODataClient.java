@@ -71,12 +71,17 @@ public class ODataClient extends JAXBArtifact<ODataClientConfiguration> {
 		return definition;
 	}
 
-	public ODataParser getParser() throws IOException, KeyStoreException, NoSuchAlgorithmException {
-		ODataParser parser = new ODataParser();
-		if (getConfig().getHttpClient() != null) {
-			parser.setHttpClient(Services.newClient(getConfig().getHttpClient()));
+	public ODataParser getParser() {
+		try {
+			ODataParser parser = new ODataParser();
+			if (getConfig().getHttpClient() != null) {
+				parser.setHttpClient(Services.newClient(getConfig().getHttpClient()));
+			}
+			parser.setBaseId(getId());
+			return parser;
 		}
-		parser.setBaseId(getId());
-		return parser;
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
 	}
 }
