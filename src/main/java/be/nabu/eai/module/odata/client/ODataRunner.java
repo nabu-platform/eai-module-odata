@@ -11,6 +11,7 @@ import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.HTTPClient;
 import be.nabu.libs.http.core.DefaultHTTPRequest;
 import be.nabu.libs.http.core.HTTPRequestAuthenticatorFactory;
+import be.nabu.libs.http.core.HTTPUtils;
 import be.nabu.libs.odata.ODataDefinition;
 import be.nabu.libs.odata.types.Function;
 import be.nabu.libs.property.ValueUtils;
@@ -217,9 +218,7 @@ public class ODataRunner {
 			}
 			HTTPClient client = Services.getTransactionable(ServiceRuntime.getRuntime().getExecutionContext(), transactionId == null ? null : transactionId.toString(), this.client.getConfig().getHttpClient()).getClient();
 			HTTPResponse response = client.execute(request, null, "https".equals(definition.getScheme()), true);
-			if (response.getCode() < 200 || response.getCode() >= 300) {
-				throw new HTTPException(response.getCode());
-			}
+			HTTPUtils.validateResponse(response);
 			if (response.getContent() instanceof ContentPart) {
 				ReadableContainer<ByteBuffer> readable = ((ContentPart) response.getContent()).getReadable();
 				if (readable != null) {
