@@ -13,6 +13,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
+import javax.xml.bind.annotation.XmlRootElement;
+
+import be.nabu.eai.developer.ComplexContentEditor;
 import be.nabu.eai.developer.MainController;
 import be.nabu.eai.developer.managers.base.BaseJAXBGUIManager;
 import be.nabu.eai.developer.managers.util.SimpleProperty;
@@ -25,6 +28,7 @@ import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.HTTPClient;
 import be.nabu.libs.http.core.DefaultHTTPRequest;
+import be.nabu.libs.odata.parser.ODataExpansion;
 import be.nabu.libs.odata.types.Function;
 import be.nabu.libs.property.api.Property;
 import be.nabu.libs.property.api.Value;
@@ -34,6 +38,7 @@ import be.nabu.libs.resources.api.ReadableResource;
 import be.nabu.libs.resources.api.Resource;
 import be.nabu.libs.resources.api.WritableResource;
 import be.nabu.libs.types.base.ValueImpl;
+import be.nabu.libs.types.java.BeanInstance;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.io.api.ByteBuffer;
 import be.nabu.utils.io.api.ReadableContainer;
@@ -82,6 +87,11 @@ public class ODataClientGUIManager extends BaseJAXBGUIManager<ODataClientConfigu
 	}
 
 	@Override
+	protected List<String> getBlacklistedProperties() {
+		return Arrays.asList("entitySets", "expansions");
+	}
+
+	@Override
 	public void display(MainController controller, AnchorPane pane, ODataClient instance) {
 		ScrollPane scroll = new ScrollPane();
 		AnchorPane.setBottomAnchor(scroll, 0d);
@@ -115,6 +125,11 @@ public class ODataClientGUIManager extends BaseJAXBGUIManager<ODataClientConfigu
 				
 				// we want this as the default
 				accordion.setExpandedPane(entitySets);
+				
+				VBox drawExpansions = drawExpansions(instance);
+				// allow expansions
+				TitledPane expansions = new TitledPane("Expansions", drawExpansions);
+				accordion.getPanes().add(1, expansions);
 			}
 			catch (Exception e) {
 				MainController.getInstance().notify(e);
@@ -278,6 +293,28 @@ public class ODataClientGUIManager extends BaseJAXBGUIManager<ODataClientConfigu
 		catch (Exception e) {
 			throw new RuntimeException(e);
 		}
+	}
+	
+	@XmlRootElement(name = "expansions")
+	public static class ExpansionEditor {
+		private ODataClient instance;
+
+		public ExpansionEditor(ODataClient instance) {
+			this.instance = instance;
+		}
+		public List<ODataExpansion> getExpansions() {
+			return instance.getConfig().getExpansions();
+		}
+		public void setExpansions(List<ODataExpansion> expansions) {
+			instance.getConfig().setExpansions(expansions);
+		}
+	}
+	private VBox drawExpansions(ODataClient instance) {
+		ExpansionEditor expansionEditor = new ExpansionEditor(instance);
+		ComplexContentEditor complexContentEditor = new ComplexContentEditor(new BeanInstance<ExpansionEditor>(expansionEditor), true, getRepository(instance));
+		VBox box = new VBox();
+		box.getChildren().add(complexContentEditor.getTree());
+		return box;
 	}
 	
 	private VBox drawEntitySets(ODataClient instance) {

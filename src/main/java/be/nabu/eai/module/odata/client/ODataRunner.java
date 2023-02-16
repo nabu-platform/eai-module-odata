@@ -2,23 +2,31 @@ package be.nabu.eai.module.odata.client;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
+import be.nabu.eai.module.odata.client.api.ODataRequestRewriter;
 import be.nabu.eai.repository.util.Filter;
-import be.nabu.libs.http.HTTPException;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.HTTPClient;
 import be.nabu.libs.http.core.DefaultHTTPRequest;
 import be.nabu.libs.http.core.HTTPRequestAuthenticatorFactory;
 import be.nabu.libs.http.core.HTTPUtils;
 import be.nabu.libs.odata.ODataDefinition;
+import be.nabu.libs.odata.parser.ODataExpansion;
 import be.nabu.libs.odata.types.Function;
+import be.nabu.libs.odata.types.NavigationProperty;
 import be.nabu.libs.property.ValueUtils;
 import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.types.TypeUtils;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
+import be.nabu.libs.types.api.DefinedType;
 import be.nabu.libs.types.api.Element;
 import be.nabu.libs.types.api.Marshallable;
 import be.nabu.libs.types.api.SimpleType;
@@ -28,25 +36,39 @@ import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.json.JSONBinding;
 import be.nabu.libs.types.java.BeanInstance;
 import be.nabu.libs.types.mask.MaskedContent;
+import be.nabu.libs.types.properties.CollectionNameProperty;
+import be.nabu.libs.types.properties.DuplicateProperty;
+import be.nabu.libs.types.properties.ForeignKeyProperty;
+import be.nabu.libs.types.properties.ForeignNameProperty;
 import be.nabu.libs.types.properties.MaxOccursProperty;
 import be.nabu.libs.types.properties.PrimaryKeyProperty;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.io.api.ByteBuffer;
 import be.nabu.utils.io.api.ReadableContainer;
 import be.nabu.utils.mime.api.ContentPart;
+import be.nabu.utils.mime.api.Header;
 import be.nabu.utils.mime.api.ModifiablePart;
 import be.nabu.utils.mime.impl.MimeHeader;
+import be.nabu.utils.mime.impl.MimeUtils;
 import be.nabu.utils.mime.impl.PlainMimeContentPart;
 import be.nabu.utils.mime.impl.PlainMimeEmptyPart;
 import nabu.protocols.http.client.Services;
 
+/**
+ * To update bindings, we currently do this:
+ * 
+ * the update function injects both the local fields (start with _ in dynamics for instance)
+ * it will inject a complex type to represent the binding (in case you want to create a new one)
+ * it will inject a string with the name of @odata.bind to use an existing binding
+ * 
+ */
 public class ODataRunner {
 	private ODataDefinition definition;
 	private ODataClient client;
 
 	public ODataRunner(ODataClient client) {
 		this.client = client;
-		this.definition = client.getDefinition();
+		this.definition = client == null ? null : client.getDefinition();
 	}
 	
 	@SuppressWarnings({ "rawtypes", "unchecked" })
@@ -65,6 +87,7 @@ public class ODataRunner {
 				if (primaryKey != null && primaryKey) {
 					target += "(";
 					boolean closeQuotes = false;
+					// uuids don't need quotes, nor do numbers
 					if (String.class.isAssignableFrom(((SimpleType<?>) element.getType()).getInstanceClass())) {
 						target += "'";
 						closeQuotes = true;
@@ -172,6 +195,33 @@ public class ODataRunner {
 				charset = Charset.forName("UTF-8");
 			}
 			
+			// if we are getting, we need to keep track of expansion
+			// we use the duplicate property for that
+			if ("GET".equalsIgnoreCase(function.getMethod())) {
+				String expand = null;
+				for (Element<?> child : TypeUtils.getAllChildren(function.getOutput())) {
+					String value = ValueUtils.getValue(DuplicateProperty.getInstance(), child.getProperties());
+					if (value != null && !value.trim().isEmpty()) {
+						if (expand == null) {
+							expand = value;
+						}
+						else {
+							expand += "," + value;
+						}
+					}
+				}
+				if (expand != null) {
+					if (queryBegun) {
+						target += "&";
+					}
+					else {
+						queryBegun = true;
+						target += "?";
+					}
+					target += "$expand=" + expand;
+				}
+			}
+			
 			ModifiablePart part = null;
 			byte [] content = null;
 			if (functionInput != null) {
@@ -181,6 +231,15 @@ public class ODataRunner {
 				
 				if ("application/json".equals(contentType)) {
 					binding = new JSONBinding(functionInput.getType(), charset);
+					// especially because we are using a PATCH method, we don't want to force this!
+					((JSONBinding) binding).setMarshalNonExistingRequiredFields(false);
+					// when we are using the odata.bind stuff, we need to be able to set raw values
+					((JSONBinding) binding).setAllowRaw(true);
+				}
+
+				// update the foreign keys
+				if ("PUT".equalsIgnoreCase(function.getMethod()) || "PATCH".equalsIgnoreCase(function.getMethod()) || "POST".equalsIgnoreCase(function.getMethod())) {
+					scanForForeignKeys(functionInput);
 				}
 				
 				ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -216,10 +275,38 @@ public class ODataRunner {
 					throw new IllegalStateException("Could not authenticate the request");
 				}
 			}
+			
+			ODataRequestRewriter rewriter = client.getRewriter();
+			if (rewriter != null) {
+				rewriter.rewrite(client.getId(), request);
+			}
+				
 			HTTPClient client = Services.getTransactionable(ServiceRuntime.getRuntime().getExecutionContext(), transactionId == null ? null : transactionId.toString(), this.client.getConfig().getHttpClient()).getClient();
 			HTTPResponse response = client.execute(request, null, "https".equals(definition.getScheme()), true);
 			HTTPUtils.validateResponse(response);
-			if (response.getContent() instanceof ContentPart) {
+			// we did a create and want to check for a header that indicates the id of
+			if (response.getCode() == 204 && "POST".equalsIgnoreCase(function.getMethod())) {
+				Header header = MimeUtils.getHeader("OData-EntityId", response.getContent().getHeaders());
+				if (header == null) {
+					header = MimeUtils.getHeader("Location", response.getContent().getHeaders());
+				}
+				if (header != null) {
+					// check if there is a field to put it in
+					Collection<Element<?>> allChildren = TypeUtils.getAllChildren(function.getOutput());
+					Iterator<Element<?>> iterator = allChildren.iterator();
+					if (iterator.hasNext()) {
+						Element<?> field = iterator.next();
+						// this is actually the full URI to the item, we just want to extract the id
+						String fullHeaderValue = MimeUtils.getFullHeaderValue(header);
+						// for example: https://bebat-dev.crm4.dynamics.com/api/data/v9.2/nrq_registrations(358b0d2a-f3a6-ed11-aad1-6045bd957895)
+						String id = fullHeaderValue.replaceAll("^http.*/[^/]+\\(([^)]+)\\)$", "$1");
+						ComplexContent newInstance = function.getOutput().newInstance();
+						newInstance.set(field.getName(), id);
+						return newInstance;
+					}
+				}
+			}
+			else if (response.getContent() instanceof ContentPart) {
 				ReadableContainer<ByteBuffer> readable = ((ContentPart) response.getContent()).getReadable();
 				if (readable != null) {
 					try {
@@ -280,6 +367,99 @@ public class ODataRunner {
 		}
 	}
 	
+	// TODO: currently if we were using integer keys, we can't actually put a string syntax there!
+	// so for integer foreign keys we need to restrict the field and re-add it with a string type in the parser!
+	// when we update foreign keys, we need to use a special syntax
+	private void scanForForeignKeys(ComplexContent content) {
+		// for complex keys we might bind the same thing multiple times which is not too bad in and off itself but is a performance hit
+		List<String> alreadyBound = new ArrayList<String>();
+		Map<String, NavigationProperty> applicableProperties = new HashMap<String, NavigationProperty>();
+		List<NavigationProperty> navigationProperties = definition.getNavigationProperties();
+		if (content.getType() instanceof DefinedType) {
+			for (NavigationProperty property : navigationProperties) {
+				if (property.getQualifiedName().equals(((DefinedType) content.getType()).getId())) {
+					applicableProperties.put(property.getElement().getName(), property);
+				}
+			}
+		}
+		Collection<Element<?>> allChildren = TypeUtils.getAllChildren((ComplexType) content.getType());
+		for (Element<?> child : allChildren) {
+			// we have a binding element
+			if (child.getName().endsWith("@odata.bind")) {
+				// next to the binding string element there should be a complex type that looks like the actual thing
+				// the complex type should be used to create a new entry, the bind should be used to bind an existing entity
+				String complexName = child.getName().substring(0, child.getName().length() - "@odata.bind".length());
+				Element<?> complexBind = content.getType().get(complexName);
+				if (complexBind != null) {
+					// get the entity-set specific collection name
+					String collectionName = ValueUtils.getValue(CollectionNameProperty.getInstance(), complexBind.getProperties());
+					// if null, we assume there is only one collection for that type, it should be annotated at the global type
+					if (collectionName == null) {
+						ComplexType globalType = (ComplexType) client.getRepository().resolve(((DefinedType) complexBind.getType()).getId());
+						if (globalType != null) {
+							collectionName = ValueUtils.getValue(CollectionNameProperty.getInstance(), globalType.getProperties());
+						}
+					}
+					if (collectionName != null) {
+						List<Element<?>> linked = new ArrayList<Element<?>>();
+						for (Element<?> potential : allChildren) {
+							String foreignName = ValueUtils.getValue(ForeignNameProperty.getInstance(), potential.getProperties());
+							// linked to this type
+							if (foreignName != null && foreignName.equals(complexName)) {
+								linked.add(potential);
+							}
+						}
+						if (linked.size() == 1) {
+							Object childValue = content.get(linked.get(0).getName());
+							if (childValue instanceof Iterable) {
+								int counter = 0;
+								for (Object singleChild : (Iterable) childValue) {
+									content.set(child.getName() + "[" + counter++ + "]", "/" + collectionName + "(" + (singleChild instanceof String ? "'" : "") + singleChild + (singleChild instanceof String ? "'" : "") + ")");
+								}
+								// unset actual
+								content.set(linked.get(0).getName(), null);
+							}
+							else if (childValue != null) {
+								content.set(child.getName(), "/" + collectionName + "(" + (childValue instanceof String ? "'" : "") + childValue + (childValue instanceof String ? "'" : "") + ")");
+								// unset actual
+								content.set(linked.get(0).getName(), null);
+							}
+						}
+						// no support yet for lists of values!!
+						else if (linked.size() > 1) {
+							String query = "";
+							for (Element<?> bindValue : linked) {
+								String foreignKey = ValueUtils.getValue(ForeignKeyProperty.getInstance(), bindValue.getProperties());
+								if (foreignKey != null) {
+									String [] parts = foreignKey.split(":");
+									Object newValue = content.get(bindValue.getName());
+									if (newValue != null) {
+										if (!query.isEmpty()) {
+											query += ",";
+										}
+										query += parts[1] + "=" + (newValue instanceof String ? "'" : "") + newValue + (newValue instanceof String ? "'" : "");
+										// unset actual
+										content.set(bindValue.getName(), null);
+									}
+								}
+							}
+							if (!query.isEmpty()) {
+								content.set(child.getName(), "/" + collectionName + "(" + query + ")");
+							}
+						}
+					}
+				}
+			}
+			else if (child.getType() instanceof ComplexType) {
+				Object object = content.get(child.getName());
+				if (object instanceof ComplexContent) {
+					scanForForeignKeys((ComplexContent) object);
+				}
+				// TODO: lists as well?
+				// TODO: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/associate-disassociate-entities-using-web-api
+			}
+		}
+	}
 	
 	// this is inspired by, copied from the jdbc code
 	
@@ -306,6 +486,15 @@ public class ODataRunner {
 			}
 		}
 		return false;
+	}
+	public static void main(String...args) {
+		List<Filter> filters = new ArrayList<Filter>();
+		Filter filter = new Filter();
+		filter.setKey("accountid");
+		filter.setOperator("=");
+		filter.setValues(Arrays.asList("a", "b"));
+		filters.add(filter);
+		System.out.println(new ODataRunner(null).buildFilter(filters));
 	}
 	private String buildFilter(List<Filter> filters) {
 		String where = "";
@@ -377,7 +566,7 @@ public class ODataRunner {
 			}
 			where += " " + mapOperator(operator);
 			
-			if (filter.getValues() != null && !filter.getValues().isEmpty() && inputOperators.contains(operator)) {
+			if (filter.getValues() != null && !filter.getValues().isEmpty() && (inputOperators.contains(operator) || "in".equals(operator))) {
 				if (filter.getValues().size() == 1) {
 					Object object = filter.getValues().get(0);
 					// for the like operator, we have probably injected "%" to indicate wildcards, remove those, there are no wildcards here
@@ -399,13 +588,13 @@ public class ODataRunner {
 							first = false;
 						}
 						else {
-							where += ", ";
+							where += ",";
 						}
 						if (filter.isCaseInsensitive()) {
-							where += " tolower('" + single + "')";
+							where += "tolower('" + single + "')";
 						}
 						else {
-							where += " " + (single instanceof String ? "'" + single + "'" : single);
+							where += (single instanceof String ? "'" + single + "'" : single);
 						}
 					}
 					where += ")";
@@ -468,6 +657,6 @@ public class ODataRunner {
 		else if ("is not null".equals(operator)) {
 			return "ne null";
 		}
-		return null;
+		return operator;
 	}
 }

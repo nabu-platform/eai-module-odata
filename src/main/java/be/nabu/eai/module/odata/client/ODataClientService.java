@@ -33,6 +33,7 @@ public class ODataClientService implements DefinedService, ExternalDependencyArt
 	private Function function;
 	private String id;
 	private ODataClient client;
+	private ComplexType input;
 
 	public ODataClientService(String id, ODataClient client, Function function) {
 		this.id = id;
@@ -54,18 +55,21 @@ public class ODataClientService implements DefinedService, ExternalDependencyArt
 			
 			@Override
 			public ComplexType getInputDefinition() {
-				ComplexType input = function.getInput();
-				// if we have the filter input, let's also support structured filters
-				if (input.get("filter") != null) {
-					Structure extended = new Structure();
-					extended.setName("input");
-					extended.setSuperType(input);
-					extended.add(new ComplexElementImpl("filters", (ComplexType) BeanResolver.getInstance().resolve(Filter.class), extended, 
-						new ValueImpl<Integer>(MinOccursProperty.getInstance(), 0),
-						new ValueImpl<Integer>(MaxOccursProperty.getInstance(), 0)));
-					input = extended;
+				if (ODataClientService.this.input == null) {
+					ComplexType input = function.getInput();
+					// if we have the filter input, let's also support structured filters
+					if (input.get("filter") != null) {
+						Structure extended = new Structure();
+						extended.setName("input");
+						extended.setSuperType(input);
+						extended.add(new ComplexElementImpl("filters", (ComplexType) BeanResolver.getInstance().resolve(Filter.class), extended, 
+							new ValueImpl<Integer>(MinOccursProperty.getInstance(), 0),
+							new ValueImpl<Integer>(MaxOccursProperty.getInstance(), 0)));
+						input = extended;
+					}
+					ODataClientService.this.input = input;
 				}
-				return input;
+				return ODataClientService.this.input;
 			}
 		};
 	}

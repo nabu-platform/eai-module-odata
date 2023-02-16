@@ -1,21 +1,21 @@
 package be.nabu.eai.module.odata.client;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
 
+import be.nabu.eai.module.odata.client.api.ODataRequestRewriter;
 import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.artifacts.jaxb.JAXBArtifact;
-import be.nabu.libs.http.api.client.HTTPClient;
+import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.libs.odata.ODataDefinition;
 import be.nabu.libs.odata.parser.ODataParser;
 import be.nabu.libs.resources.api.ManageableContainer;
+import be.nabu.libs.resources.api.ReadableResource;
 import be.nabu.libs.resources.api.Resource;
 import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.resources.api.WritableResource;
-import be.nabu.libs.resources.api.ReadableResource;
+import be.nabu.libs.services.api.DefinedService;
+import be.nabu.libs.services.pojo.POJOUtils;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.io.api.ByteBuffer;
 import be.nabu.utils.io.api.ReadableContainer;
@@ -30,6 +30,24 @@ public class ODataClient extends JAXBArtifact<ODataClientConfiguration> {
 		super(id, directory, repository, "odata-client.xml", ODataClientConfiguration.class);
 	}
 
+	private ODataRequestRewriter rewriter;
+	private boolean rewriterResolved;
+	
+	public ODataRequestRewriter getRewriter() {
+		if (!rewriterResolved) {
+			synchronized(this) {
+				if (!rewriterResolved) {
+					DefinedService requestRewriter = getConfig().getRequestRewriter();
+					if (requestRewriter != null) {
+						this.rewriter = POJOUtils.newProxy(ODataRequestRewriter.class, requestRewriter, getRepository(), SystemPrincipal.ROOT);
+					}
+					rewriterResolved = true;
+				}
+			}
+		}
+		return rewriter;
+	}
+	
 	public ODataDefinition getDefinition() {
 		try {
 			if (definition == null && getConfig().getEndpoint() != null) {
@@ -37,6 +55,8 @@ public class ODataClient extends JAXBArtifact<ODataClientConfiguration> {
 					if (definition == null && getConfig().getEndpoint() != null) {
 						Resource child = getDirectory().getChild("odata-metadata.xml");
 						ODataParser parser = getParser();
+						// forward any expansion requirements
+						parser.setExpansions(getConfig().getExpansions());
 						// in development, we will backfeed the definition
 						if (child == null && EAIResourceRepository.isDevelopment()) {
 							InputStream metadata = parser.getMetadata(getConfig().getEndpoint());
