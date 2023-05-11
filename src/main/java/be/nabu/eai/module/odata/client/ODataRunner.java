@@ -22,6 +22,7 @@ import be.nabu.libs.odata.parser.ODataExpansion;
 import be.nabu.libs.odata.types.Function;
 import be.nabu.libs.odata.types.NavigationProperty;
 import be.nabu.libs.property.ValueUtils;
+import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.types.TypeUtils;
 import be.nabu.libs.types.api.ComplexContent;
@@ -150,7 +151,7 @@ public class ODataRunner {
 					queryBegun = true;
 					target += "?";
 				}
-				target += "$search=" + search;
+				target += "$search=" + URIUtils.encodeURL(search);
 			}
 			if (orderBy != null && !orderBy.isEmpty()) {
 				if (queryBegun) {
@@ -169,7 +170,7 @@ public class ODataRunner {
 					else {
 						target += ",";
 					}
-					target += single;
+					target += URIUtils.encodeURL(single);
 				}
 			}
 			// if you didn't set an explicit filter, you might have used the filters array
@@ -187,7 +188,7 @@ public class ODataRunner {
 					queryBegun = true;
 					target += "?";
 				}
-				target += "$filter=" + filter;
+				target += "$filter=" + URIUtils.encodeURL(filter);
 			}
 				
 			Charset charset = client.getConfig().getCharset();
@@ -218,7 +219,7 @@ public class ODataRunner {
 						queryBegun = true;
 						target += "?";
 					}
-					target += "$expand=" + expand;
+					target += "$expand=" + URIUtils.encodeURL(expand);
 				}
 			}
 			
@@ -264,7 +265,9 @@ public class ODataRunner {
 			// maybe in the future we'll annotate the instances etc, but for now we leave it like this
 			// the star is a special syntax indicating that we don't really care what the current version is, we just want to update it
 			if ("PUT".equalsIgnoreCase(function.getMethod()) || "DELETE".equalsIgnoreCase(function.getMethod()) || "PATCH".equalsIgnoreCase(function.getMethod())) {
-				part.setHeader(new MimeHeader("If-Match", "*"));
+				if (!client.getConfig().isIgnoreEtag()) {
+					part.setHeader(new MimeHeader("If-Match", "*"));
+				}
 			}
 			
 			DefaultHTTPRequest request = new DefaultHTTPRequest(function.getMethod(), target, part);

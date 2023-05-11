@@ -34,6 +34,8 @@ public class ODataClientConfiguration {
 	
 	private DefinedService requestRewriter;
 	
+	private boolean ignoreEtag;
+	
 	@Field(comment = "You can opt for using a specific http client, for example if you are working with self-signed certificates for internal infrastructure. If left empty, the default http client will be used.")
 	@Advanced
 	@XmlJavaTypeAdapter(value = ArtifactXMLAdapter.class)
@@ -91,5 +93,15 @@ public class ODataClientConfiguration {
 	public void setExpansions(List<ODataExpansion> expansions) {
 		this.expansions = expansions;
 	}
+	
+	@Advanced
+	@Field(comment = "By default we will send a If-Match: * header but some systems (like ms graph) don't like this. They do allow sending no header at all. If you enable this, we will not send a header unless it is explicitly known.")
+	public boolean isIgnoreEtag() {
+		return ignoreEtag;
+	}
+	public void setIgnoreEtag(boolean ignoreEtag) {
+		this.ignoreEtag = ignoreEtag;
+	}
+	
 	
 }
