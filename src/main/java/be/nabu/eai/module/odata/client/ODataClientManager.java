@@ -6,6 +6,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import be.nabu.eai.module.types.structure.StructureManager;
 import be.nabu.eai.repository.EAINode;
 import be.nabu.eai.repository.EAIRepositoryUtils;
@@ -26,6 +29,8 @@ import be.nabu.libs.types.api.SimpleType;
 
 public class ODataClientManager extends JAXBArtifactManager<ODataClientConfiguration, ODataClient> implements ArtifactRepositoryManager<ODataClient> {
 
+	private Logger logger = LoggerFactory.getLogger(getClass());
+	
 	public ODataClientManager() {
 		super(ODataClient.class);
 	}
@@ -37,8 +42,12 @@ public class ODataClientManager extends JAXBArtifactManager<ODataClientConfigura
 		List<String> entitySets = artifact.getConfig().getEntitySets();
 		Set<String> usedTypes = new HashSet<String>();
 		boolean showAll = false;
+		ODataDefinition definition = artifact.getDefinition();
+		if (definition == null) {
+			logger.warn("Could not get definition for artifact: " + artifact.getId());
+			return entries;
+		}
 		if (entitySets != null || showAll) {
-			ODataDefinition definition = artifact.getDefinition();
 			List<Function> functions = definition.getFunctions();
 			if (functions != null) {
 				for (Function function : functions) {
@@ -56,15 +65,15 @@ public class ODataClientManager extends JAXBArtifactManager<ODataClientConfigura
 				}
 			}
 		}
-		for (String namespace : artifact.getDefinition().getRegistry().getNamespaces()) {
-			for (ComplexType type : artifact.getDefinition().getRegistry().getComplexTypes(namespace)) {
+		for (String namespace : definition.getRegistry().getNamespaces()) {
+			for (ComplexType type : definition.getRegistry().getComplexTypes(namespace)) {
 				if (type instanceof DefinedType) {
 					if (showAll || usedTypes.contains(((DefinedType) type).getId())) {
 						addChild(root, artifact, entries, (DefinedType) type);
 					}
 				}
 			}
-			for (SimpleType<?> type : artifact.getDefinition().getRegistry().getSimpleTypes(namespace)) {
+			for (SimpleType<?> type : definition.getRegistry().getSimpleTypes(namespace)) {
 				if (type instanceof DefinedType) {
 					if (showAll || usedTypes.contains(((DefinedType) type).getId())) {
 						addChild(root, artifact, entries, (DefinedType) type);
