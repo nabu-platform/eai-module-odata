@@ -1,6 +1,9 @@
 package be.nabu.eai.module.odata.client;
 
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Pattern;
 
 import be.nabu.eai.module.odata.client.api.ODataRequestRewriter;
 import be.nabu.eai.repository.EAIResourceRepository;
@@ -46,6 +49,21 @@ public class ODataClient extends JAXBArtifact<ODataClientConfiguration> {
 			}
 		}
 		return rewriter;
+	}
+	
+	public List<String> getPathParameters() {
+		List<String> parameters = new ArrayList<String>();
+		String path = getConfig().getEndpoint().getPath();
+		if (path != null) {
+			Pattern pattern = Pattern.compile("\\{[^}]+\\}");
+			java.util.regex.Matcher matcher = pattern.matcher(path);
+			while (matcher.find()) {
+				String match = matcher.group();
+				match = match.substring(1, match.length() - 1).trim();
+				parameters.add(match);
+			}
+		}
+		return parameters;
 	}
 	
 	public ODataDefinition getDefinition() {

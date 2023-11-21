@@ -19,9 +19,11 @@ import be.nabu.libs.services.api.Service;
 import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceInstance;
 import be.nabu.libs.services.api.ServiceInterface;
+import be.nabu.libs.types.SimpleTypeWrapperFactory;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
 import be.nabu.libs.types.base.ComplexElementImpl;
+import be.nabu.libs.types.base.SimpleElementImpl;
 import be.nabu.libs.types.base.ValueImpl;
 import be.nabu.libs.types.java.BeanResolver;
 import be.nabu.libs.types.properties.MaxOccursProperty;
@@ -57,15 +59,31 @@ public class ODataClientService implements DefinedService, ExternalDependencyArt
 			public ComplexType getInputDefinition() {
 				if (ODataClientService.this.input == null) {
 					ComplexType input = function.getInput();
+					Structure extended = null;
 					// if we have the filter input, let's also support structured filters
 					if (input.get("filter") != null) {
-						Structure extended = new Structure();
+						extended = new Structure();
 						extended.setName("input");
 						extended.setSuperType(input);
+						input = extended;
 						extended.add(new ComplexElementImpl("filters", (ComplexType) BeanResolver.getInstance().resolve(Filter.class), extended, 
 							new ValueImpl<Integer>(MinOccursProperty.getInstance(), 0),
 							new ValueImpl<Integer>(MaxOccursProperty.getInstance(), 0)));
+					}
+					List<String> pathParameters = client.getPathParameters();
+					if (pathParameters != null && !pathParameters.isEmpty()) {
+						if (extended == null) {
+							extended = new Structure();
+							extended.setName("input");
+							extended.setSuperType(input);
+						}
 						input = extended;
+						Structure path = new Structure();
+						path.setName("path");
+						for (String parameter : pathParameters) {
+							path.add(new SimpleElementImpl<String>(parameter, SimpleTypeWrapperFactory.getInstance().getWrapper().wrap(String.class), path));
+						}
+						extended.add(new ComplexElementImpl("path", path, extended));
 					}
 					ODataClientService.this.input = input;
 				}

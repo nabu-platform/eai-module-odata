@@ -12,6 +12,7 @@ import java.util.Map;
 
 import be.nabu.eai.module.odata.client.api.ODataRequestRewriter;
 import be.nabu.eai.repository.util.Filter;
+import be.nabu.libs.converter.ConverterFactory;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.HTTPClient;
 import be.nabu.libs.http.core.DefaultHTTPRequest;
@@ -78,10 +79,124 @@ public class ODataRunner {
 			Object transactionId = input == null ? null : input.get("transactionId");
 			
 			String target = definition.getBasePath();
+			
+			Element<?> pathElement = input.getType().get("path");
+			// if we have a path element, we likely have variables in the path, check it and replace it
+			if (pathElement != null) {
+				for (Element<?> child : TypeUtils.getAllChildren((ComplexType) pathElement.getType())) {
+					String value = (String) input.get("path/" + child.getName());
+					// don't replace if you don't fill it in, it might be part of the url?
+					if (value != null) {
+						target = target.replaceAll("\\{[\\s]*" + child.getName() + "[\\s]*\\}", value == null ? "" : value);
+					}
+				}
+			}
+			
+			Collection<Element<?>> inputChildren = TypeUtils.getAllChildren(function.getInput());
+			Collection<Element<?>> outputChildren = TypeUtils.getAllChildren(function.getOutput());
+			
+			ComplexType usedType = null;
+			// check for parent ids for contained navigation properties
+			for (Element<?> element : inputChildren) {
+				// we have an input?
+				if (element.getType() instanceof ComplexType) {
+					usedType = (ComplexType) element.getType();
+					ComplexContent functionInput = input == null ? null : (ComplexContent) input.get(element.getName());
+					if (functionInput != null) {
+						for (Element<?> child : TypeUtils.getAllChildren(functionInput.getType())) {
+							// if it is a parent, add it to the path
+							int indexOf = child.getName().indexOf("@odata.parent.id");
+							if (indexOf > 0) {
+								Object parentValue = functionInput.get(child.getName());
+								if (parentValue != null) {
+									if (!(parentValue instanceof Iterable)) {
+										parentValue = Arrays.asList(parentValue);
+									}
+									String entitySetName = child.getName().substring(0, indexOf);
+									for (Object singleParentValue : (Iterable) parentValue) {
+										if (singleParentValue != null) {
+											if (client.getConfig().isKeyAsSegment()) {
+												// keys can be given as segments
+												// in sharepoint the segment way works /sites/id but the default /sites(id) does not
+												// http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html#sec_KeyasSegmentConvention
+												target += "/" + entitySetName + "/" + ((Marshallable) child.getType()).marshal(singleParentValue, child.getProperties());
+											}
+											else {
+												target += "/" + entitySetName + "(" + ((Marshallable) child.getType()).marshal(singleParentValue, child.getProperties()) + ")";
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			// if we do not have a complex type in the input, check the output
+			if (usedType == null) {
+				for (Element<?> element : outputChildren) {
+					// we have an input?
+					if (element.getType() instanceof ComplexType) {
+						usedType = (ComplexType) element.getType();
+					}
+				}
+			}
+			
+			// if we have filters, check if you are filtering on the parent ids, we also need to add them then!
+			List<Filter> filters = input == null ? null : (List<Filter>) input.get("filters");
+			if (filters != null && !filters.isEmpty()) {
+				// don't modify the original list
+				filters = new ArrayList<Filter>(filters);
+				Iterator<Filter> iterator = filters.iterator();
+				while (iterator.hasNext()) {
+					Object filterObject = iterator.next();
+					if (filterObject instanceof MaskedContent) {
+						filterObject = ((MaskedContent) filterObject).getOriginal();
+					}
+					if (filterObject instanceof BeanInstance) {
+						filterObject = ((BeanInstance<?>) filterObject).getUnwrapped();
+					}
+					Filter filter = (Filter) filterObject;
+					int indexOf = filter.getKey().indexOf("@odata.parent.id");
+					if (indexOf > 0) {
+						if (filter.getValues() != null && !filter.getValues().isEmpty()) {
+							String entitySetName = filter.getKey().substring(0, indexOf);
+							for (Object singleParentValue : filter.getValues()) {
+								if (singleParentValue != null) {
+									// keys can be given as segments
+									// in sharepoint the segment way works /sites/id but the default /sites(id) does not so we use this as default for now
+									// in the future we may want to offer configuration to tweak this behavior because it is hard to rewrite this into the other syntax
+									// http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html#sec_KeyasSegmentConvention
+									Element<?> filterElement = usedType == null ? null : usedType.get(filter.getKey());
+									String stringified = null;
+									if (filterElement == null) {
+										stringified = ConverterFactory.getInstance().getConverter().convert(singleParentValue, String.class);
+									}
+									else {
+										stringified = ((Marshallable) filterElement.getType()).marshal(singleParentValue, filterElement.getProperties());
+									}
+									if (client.getConfig().isKeyAsSegment()) {
+										// keys can be given as segments
+										// in sharepoint the segment way works /sites/id but the default /sites(id) does not
+										// http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html#sec_KeyasSegmentConvention
+										target += "/" + entitySetName + "/" + stringified;
+									}
+									else {
+										target += "/" + entitySetName + "(" + stringified + ")";
+										
+									}
+								}
+							}	
+						}
+						iterator.remove();
+					}
+				}
+			}
+			
 			// the context is set to the entity set name
 			target += "/" + function.getContext();
 			ComplexContent functionInput = null;
-			for (Element<?> element : TypeUtils.getAllChildren(function.getInput())) {
+			for (Element<?> element : inputChildren) {
 				// if we have a primary key field, we are likely doing a specific get or an update/delete
 				// either way we have to pass it in the URL
 				Boolean primaryKey = ValueUtils.getValue(PrimaryKeyProperty.getInstance(), element.getProperties());
@@ -174,11 +289,8 @@ public class ODataRunner {
 				}
 			}
 			// if you didn't set an explicit filter, you might have used the filters array
-			if (filter == null) {
-				List<Filter> filters = input == null ? null : (List<Filter>) input.get("filters");
-				if (filters != null && !filters.isEmpty()) {
-					filter = buildFilter(filters);
-				}
+			if (filter == null && filters != null && !filters.isEmpty()) {
+				filter = buildFilter(filters);
 			}
 			if (filter != null) {
 				if (queryBegun) {
@@ -200,7 +312,7 @@ public class ODataRunner {
 			// we use the duplicate property for that
 			if ("GET".equalsIgnoreCase(function.getMethod())) {
 				String expand = null;
-				for (Element<?> child : TypeUtils.getAllChildren(function.getOutput())) {
+				for (Element<?> child : outputChildren) {
 					String value = ValueUtils.getValue(DuplicateProperty.getInstance(), child.getProperties());
 					if (value != null && !value.trim().isEmpty()) {
 						if (expand == null) {
@@ -295,7 +407,7 @@ public class ODataRunner {
 				}
 				if (header != null) {
 					// check if there is a field to put it in
-					Collection<Element<?>> allChildren = TypeUtils.getAllChildren(function.getOutput());
+					Collection<Element<?>> allChildren = outputChildren;
 					Iterator<Element<?>> iterator = allChildren.iterator();
 					if (iterator.hasNext()) {
 						Element<?> field = iterator.next();
@@ -318,7 +430,7 @@ public class ODataRunner {
 						boolean isListBinding = false;
 						String resultName = null;
 						ComplexType result = null;
-						for (Element<?> element : TypeUtils.getAllChildren(function.getOutput())) {
+						for (Element<?> element : outputChildren) {
 							if (element.getType() instanceof ComplexType) {
 								Integer maxOccurs = ValueUtils.getValue(MaxOccursProperty.getInstance(), element.getProperties());
 								// if we have a list and we are doing JSON, we actually want to bind it to the full output because the array is abstracted away in the reponse

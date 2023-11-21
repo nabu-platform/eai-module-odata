@@ -34,6 +34,9 @@ public class ODataClientConfiguration {
 	
 	private DefinedService requestRewriter;
 	
+	// http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html#sec_KeyasSegmentConvention
+	// some providers (e.g. sharepoint) expect segments. others (e.g. business central) do not
+	private boolean keyAsSegment;
 	private boolean ignoreEtag;
 	
 	@Field(comment = "You can opt for using a specific http client, for example if you are working with self-signed certificates for internal infrastructure. If left empty, the default http client will be used.")
@@ -103,5 +106,11 @@ public class ODataClientConfiguration {
 		this.ignoreEtag = ignoreEtag;
 	}
 	
-	
+	@Advanced
+	public boolean isKeyAsSegment() {
+		return keyAsSegment;
+	}
+	public void setKeyAsSegment(boolean keyAsSegment) {
+		this.keyAsSegment = keyAsSegment;
+	}
 }
