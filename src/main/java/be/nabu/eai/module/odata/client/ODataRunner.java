@@ -639,8 +639,19 @@ public class ODataRunner {
 					where += " and";
 				}
 			}
+			Filter nextFilter = null;
+			if (i < filters.size() - 1) {
+				Object nextFilterObject = filters.get(i + 1);
+				if (nextFilterObject instanceof MaskedContent) {
+					nextFilterObject = ((MaskedContent) nextFilterObject).getOriginal();
+				}
+				if (nextFilterObject instanceof BeanInstance) {
+					nextFilterObject = ((BeanInstance<?>) nextFilterObject).getUnwrapped();
+				}
+				nextFilter = (Filter) nextFilterObject;
+			}
 			// start the or
-			if (i < filters.size() - 1 && !openOr && filters.get(i + 1).isOr()) {
+			if (!openOr && nextFilter != null && nextFilter.isOr()) {
 				where += " (";
 				openOr = true;
 			}
@@ -725,7 +736,7 @@ public class ODataRunner {
 				where += ")";
 			}
 			// check if we want to close an or
-			if (i < filters.size() - 1 && openOr && !filters.get(i + 1).isOr()) {
+			if (nextFilter != null && openOr && !nextFilter.isOr()) {
 				where += ")";
 				openOr = false;
 			}
