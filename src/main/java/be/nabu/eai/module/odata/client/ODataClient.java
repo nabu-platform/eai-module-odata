@@ -74,7 +74,7 @@ public class ODataClient extends JAXBArtifact<ODataClientConfiguration> {
 						Resource child = getDirectory().getChild("odata-metadata.xml");
 						ODataParser parser = getParser();
 						// forward any expansion requirements
-						parser.setExpansions(getConfig().getExpansions());
+						parser.setEntityConfigurations(getConfig().getExpansions());
 						// in development, we will backfeed the definition
 						if (child == null && EAIResourceRepository.isDevelopment()) {
 							InputStream metadata = parser.getMetadata(getConfig().getEndpoint());

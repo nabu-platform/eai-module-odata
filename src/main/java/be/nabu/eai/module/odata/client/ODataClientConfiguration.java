@@ -14,7 +14,7 @@ import be.nabu.eai.api.ValueEnumerator;
 import be.nabu.eai.developer.impl.HTTPAuthenticatorEnumerator;
 import be.nabu.eai.module.http.client.HTTPClientArtifact;
 import be.nabu.eai.repository.jaxb.ArtifactXMLAdapter;
-import be.nabu.libs.odata.parser.ODataExpansion;
+import be.nabu.libs.odata.parser.ODataEntityConfiguration;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.types.api.annotation.Field;
 
@@ -25,7 +25,7 @@ public class ODataClientConfiguration {
 	private URI endpoint;
 	// the entitySets to expose!
 	private List<String> entitySets = new ArrayList<String>();
-	private List<ODataExpansion> expansions = new ArrayList<ODataExpansion>();
+	private List<ODataEntityConfiguration> expansions = new ArrayList<ODataEntityConfiguration>();
 	
 	// the type of the security needed (depends on whats available)
 	private String securityType;
@@ -90,10 +90,10 @@ public class ODataClientConfiguration {
 		this.requestRewriter = requestRewriter;
 	}
 	
-	public List<ODataExpansion> getExpansions() {
+	public List<ODataEntityConfiguration> getExpansions() {
 		return expansions;
 	}
-	public void setExpansions(List<ODataExpansion> expansions) {
+	public void setExpansions(List<ODataEntityConfiguration> expansions) {
 		this.expansions = expansions;
 	}
 	

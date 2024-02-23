@@ -28,7 +28,7 @@ import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.HTTPClient;
 import be.nabu.libs.http.core.DefaultHTTPRequest;
-import be.nabu.libs.odata.parser.ODataExpansion;
+import be.nabu.libs.odata.parser.ODataEntityConfiguration;
 import be.nabu.libs.odata.types.Function;
 import be.nabu.libs.property.api.Property;
 import be.nabu.libs.property.api.Value;
@@ -302,10 +302,10 @@ public class ODataClientGUIManager extends BaseJAXBGUIManager<ODataClientConfigu
 		public ExpansionEditor(ODataClient instance) {
 			this.instance = instance;
 		}
-		public List<ODataExpansion> getExpansions() {
+		public List<ODataEntityConfiguration> getExpansions() {
 			return instance.getConfig().getExpansions();
 		}
-		public void setExpansions(List<ODataExpansion> expansions) {
+		public void setExpansions(List<ODataEntityConfiguration> expansions) {
 			instance.getConfig().setExpansions(expansions);
 		}
 	}
