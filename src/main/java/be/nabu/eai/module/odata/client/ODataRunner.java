@@ -9,6 +9,7 @@ import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -202,7 +203,7 @@ public class ODataRunner {
 				charset = Charset.forName("UTF-8");
 			}
 			// TODO: probably does not work for pure "containstarget", the absolute ids used for creating new associations do not take this into account
-			if ("MERGE-ASSOCIATIONS".equals(function.getMethod())) {
+			if ("MERGE-ASSOCIATIONS".equals(function.getMethod()) || "ADD-ASSOCIATIONS".equals(function.getMethod()) || "REMOVE-ASSOCIATIONS".equals(function.getMethod())) {
 				// typeEntity == function.getContext() -> the entitysetname
 				// navigation property -> boundIds alias
 				// entityId -> input 
@@ -246,32 +247,46 @@ public class ODataRunner {
 				String listTarget = target;
 				listTarget += "/$ref";
 				
-				ModifiablePart part = new PlainMimeEmptyPart(null, 
-					new MimeHeader("Content-Length", "0"),
-					new MimeHeader("Accept", "application/json"),
-					new MimeHeader("Host", definition.getHost())
-				);
-				DefaultHTTPRequest request = new DefaultHTTPRequest("GET", listTarget, part);
-				HTTPResponse response = run((String) transactionId, request);
-				JSONBinding binding = new JSONBinding((ComplexType) BeanResolver.getInstance().resolve(AssociationList.class), charset);
-				binding.setIgnoreUnknownElements(true);
-				ReadableContainer<ByteBuffer> readable = ((ContentPart) response.getContent()).getReadable();
-				if (readable != null) {
-					try {
-						AssociationList list = TypeUtils.getAsBean(binding.unmarshal(IOUtils.toInputStream(readable), new Window[0]), AssociationList.class);
-						if (list.getAssociations() != null) {
-							for (Association association : list.getAssociations()) {
-								String odataId = association.getOdataId();
-								if (odataId != null) {
-									String id = odataId.replaceAll(".*\\(([^)]+)\\).*?", "$1");
-									existingAssociations.put(id, odataId);
+				if ("MERGE-ASSOCIATIONS".equals(function.getMethod())) {
+					ModifiablePart part = new PlainMimeEmptyPart(null, 
+						new MimeHeader("Content-Length", "0"),
+						new MimeHeader("Accept", "application/json"),
+						new MimeHeader("Host", definition.getHost())
+					);
+					DefaultHTTPRequest request = new DefaultHTTPRequest("GET", listTarget, part);
+					HTTPResponse response = run((String) transactionId, request);
+					JSONBinding binding = new JSONBinding((ComplexType) BeanResolver.getInstance().resolve(AssociationList.class), charset);
+					binding.setIgnoreUnknownElements(true);
+					ReadableContainer<ByteBuffer> readable = ((ContentPart) response.getContent()).getReadable();
+					if (readable != null) {
+						try {
+							AssociationList list = TypeUtils.getAsBean(binding.unmarshal(IOUtils.toInputStream(readable), new Window[0]), AssociationList.class);
+							if (list.getAssociations() != null) {
+								for (Association association : list.getAssociations()) {
+									String odataId = association.getOdataId();
+									if (odataId != null) {
+										String id = odataId.replaceAll(".*\\(([^)]+)\\).*?", "$1");
+										existingAssociations.put(id, odataId);
+									}
 								}
 							}
 						}
+						finally {
+							readable.close();
+						}
 					}
-					finally {
-						readable.close();
+				}
+				else if ("REMOVE-ASSOCIATIONS".equals(function.getMethod())) {
+					// we report them as existing
+					for (Object boundId : boundIds) {
+						String odataBaseUrl = definition.getScheme() + "://" + definition.getHost() + definition.getBasePath();
+	//					String odataContext = odataBaseUrl + "/$metadata#Collection($ref)";
+						//String body = "{\"@odata.context\": \"" + odataContext + "\", \"@odata.id\": \"" + boundEntityCollection + "(" + boundId + ")" + "\"}";
+						String entityUrl = odataBaseUrl + "/" + boundEntityCollection + (client.getConfig().isKeyAsSegment() ? "/" + boundId : "(" + boundId + ")");
+						existingAssociations.put(boundId.toString(), entityUrl);
 					}
+					// we want to clear the boundids so they are marked for deletion
+					boundIds = new ArrayList();
 				}
 				
 				List<DefaultHTTPRequest> requests = new ArrayList<DefaultHTTPRequest>();
@@ -283,14 +298,15 @@ public class ODataRunner {
 					// no longer exists, add a delete for it
 					if (boundIds.indexOf(key) < 0) {
 						// not sure if this needs to be key-as-segmented?
-						part = new PlainMimeEmptyPart(null, 
+						ModifiablePart part = new PlainMimeEmptyPart(null, 
 							new MimeHeader("Content-Length", "0"),
 							new MimeHeader("Accept", "application/json"),
 							new MimeHeader("Host", definition.getHost())
 						);
 						// the url is absolute
 //						request = new DefaultHTTPRequest("DELETE", target + "(" + existingAssociations.get(key) + ")/$ref", part);
-						request = new DefaultHTTPRequest("DELETE", target + "(" + key + ")/$ref", part);
+						String deleteTarget = client.getConfig().isKeyAsSegment() ? target + "/" + key + "/$ref" : target + "(" + key + ")/$ref";
+						DefaultHTTPRequest request = new DefaultHTTPRequest("DELETE", deleteTarget, part);
 						requests.add(request);
 					}
 				}
@@ -305,16 +321,16 @@ public class ODataRunner {
 						String odataBaseUrl = definition.getScheme() + "://" + definition.getHost() + definition.getBasePath();
 //						String odataContext = odataBaseUrl + "/$metadata#Collection($ref)";
 						//String body = "{\"@odata.context\": \"" + odataContext + "\", \"@odata.id\": \"" + boundEntityCollection + "(" + boundId + ")" + "\"}";
-						String body = "{\"@odata.id\": \"" + odataBaseUrl + "/" + boundEntityCollection + "(" + boundId + ")" + "\"}";
+						String body = "{\"@odata.id\": \"" + odataBaseUrl + "/" + boundEntityCollection + (client.getConfig().isKeyAsSegment() ? "/" + boundId : "(" + boundId + ")") + "\"}";
 						byte[] bytes = body.getBytes(charset);
-						part = new PlainMimeContentPart(null, IOUtils.wrap(bytes, true),
+						ModifiablePart part = new PlainMimeContentPart(null, IOUtils.wrap(bytes, true),
 							new MimeHeader("Content-Length", Integer.toString(bytes.length)),
 							new MimeHeader("Content-Type", "application/json"),
 							new MimeHeader("Accept", "application/json"),
 							new MimeHeader("Host", definition.getHost())
 						);
 						((PlainMimeContentPart) part).setReopenable(true);
-						request = new DefaultHTTPRequest("PUT", target + "/$ref", part);
+						DefaultHTTPRequest request = new DefaultHTTPRequest(client.getConfig().isUsePostForRelations() ? "POST" : "PUT", target + "/$ref", part);
 						requests.add(request);
 					}
 				}
@@ -870,12 +886,19 @@ public class ODataRunner {
 			if (filter.getValues() != null && !filter.getValues().isEmpty() && (inputOperators.contains(operator) || "in".equals(operator))) {
 				if (filter.getValues().size() == 1) {
 					Object object = filter.getValues().get(0);
+					
 					// for the like operator, we have probably injected "%" to indicate wildcards, remove those, there are no wildcards here
 					if (operator.equals("like")) {
 						object = object.toString().replace("%", "");
 					}
 					if (filter.isCaseInsensitive()) {
 						where += " tolower('" + object + "')";
+					}
+					else if (object instanceof Date) {
+						// we want classic dateTime formatting of the date, not the default java stringification
+						String stringifiedDate = ConverterFactory.getInstance().getConverter().convert(object, String.class);
+						// timezone is mandatory!
+						where += " " + stringifiedDate + "Z";
 					}
 					else {
 						where += " " + (object instanceof String ? "'" + object + "'" : object);
@@ -893,6 +916,12 @@ public class ODataRunner {
 						}
 						if (filter.isCaseInsensitive()) {
 							where += "tolower('" + single + "')";
+						}
+						else if (single instanceof Date) {
+							// we want classic dateTime formatting of the date, not the default java stringification
+							String stringifiedDate = ConverterFactory.getInstance().getConverter().convert(single, String.class);
+							// timezone is mandatory!
+							where += " " + stringifiedDate + "Z";
 						}
 						else {
 							where += (single instanceof String ? "'" + single + "'" : single);

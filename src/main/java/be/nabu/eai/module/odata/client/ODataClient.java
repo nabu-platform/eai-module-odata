@@ -1,8 +1,11 @@
 package be.nabu.eai.module.odata.client;
 
 import java.io.InputStream;
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import be.nabu.eai.module.odata.client.api.ODataRequestRewriter;
@@ -10,19 +13,30 @@ import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.artifacts.jaxb.JAXBArtifact;
 import be.nabu.eai.repository.util.SystemPrincipal;
+import be.nabu.libs.http.HTTPException;
+import be.nabu.libs.http.api.HTTPRequest;
+import be.nabu.libs.http.api.HTTPResponse;
+import be.nabu.libs.http.api.client.HTTPClient;
+import be.nabu.libs.http.core.DefaultHTTPRequest;
+import be.nabu.libs.http.core.HTTPRequestAuthenticatorFactory;
 import be.nabu.libs.odata.ODataDefinition;
 import be.nabu.libs.odata.parser.ODataParser;
+import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.resources.api.ManageableContainer;
 import be.nabu.libs.resources.api.ReadableResource;
 import be.nabu.libs.resources.api.Resource;
 import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.resources.api.WritableResource;
+import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.pojo.POJOUtils;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.io.api.ByteBuffer;
 import be.nabu.utils.io.api.ReadableContainer;
 import be.nabu.utils.io.api.WritableContainer;
+import be.nabu.utils.mime.api.ContentPart;
+import be.nabu.utils.mime.impl.MimeHeader;
+import be.nabu.utils.mime.impl.PlainMimeEmptyPart;
 import nabu.protocols.http.client.Services;
 
 public class ODataClient extends JAXBArtifact<ODataClientConfiguration> {
@@ -117,6 +131,63 @@ public class ODataClient extends JAXBArtifact<ODataClientConfiguration> {
 			}
 			parser.setBaseId(getId());
 			return parser;
+		}
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+	
+	public void refreshMetadata() {
+		
+	}
+	
+	public InputStream getMetadata(ODataClient client, URI url, boolean authenticate) {
+		URI child = URIUtils.getChild(url, "$metadata");
+		HTTPClient httpClient = client.getParser().getHTTPClient();
+		HTTPRequest request = new DefaultHTTPRequest("GET", child.getPath(), new PlainMimeEmptyPart(null, 
+			new MimeHeader("Content-Length", "0"),
+			new MimeHeader("Accept", "application/xml"),
+			new MimeHeader("User-Agent", "User agent"),
+			new MimeHeader("Host", child.getHost())
+		));
+		// TODO: we could use the security here as well...?
+		// but this is client side, maybe we need to push this to server side?
+		try {
+			HTTPResponse response = httpClient.execute(request, null, child.getScheme().equals("https"), true);
+			if (authenticate && client.getConfig().getSecurityType() != null) {
+				Map<String, Object> original = ServiceRuntime.getGlobalContext();
+				HashMap<String, Object> runtimeContext = new HashMap<String, Object>();
+				runtimeContext.put("service.context", client.getId());
+				ServiceRuntime.setGlobalContext(runtimeContext);
+				try {
+					if (!HTTPRequestAuthenticatorFactory.getInstance().getAuthenticator(client.getConfig().getSecurityType())
+							.authenticate(request, client.getConfig().getSecurityContext(), null, false)) {
+						throw new IllegalStateException("Could not authenticate the request");
+					}
+				}
+				finally {
+					ServiceRuntime.setGlobalContext(original);
+				}
+			}
+			// if we have a 401 and we are currently doing an unauthenticated call, check if we can make an authenticated one
+			if (response.getCode() == 401 && !authenticate && client.getConfig().getSecurityType() != null) {
+				return getMetadata(client, url, true);
+			}
+			else if (response.getCode() >= 200 && response.getCode() < 300) {
+				if (response.getContent() instanceof ContentPart) {
+					ReadableContainer<ByteBuffer> readable = ((ContentPart) response.getContent()).getReadable();
+					return IOUtils.toInputStream(readable);
+				}
+				else {
+					throw new IllegalStateException("The response does not contain any content");
+				}
+			}
+			else {
+				throw new HTTPException(response.getCode());
+			}
+		}
+		catch (RuntimeException e) {
+			throw e;
 		}
 		catch (Exception e) {
 			throw new RuntimeException(e);

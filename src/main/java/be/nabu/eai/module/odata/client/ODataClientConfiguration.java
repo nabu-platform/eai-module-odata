@@ -23,6 +23,7 @@ public class ODataClientConfiguration {
 	private HTTPClientArtifact httpClient;
 	private Charset charset;
 	private URI endpoint;
+	private boolean usePostForRelations;
 	// the entitySets to expose!
 	private List<String> entitySets = new ArrayList<String>();
 	private List<ODataEntityConfiguration> expansions = new ArrayList<ODataEntityConfiguration>();
@@ -113,4 +114,15 @@ public class ODataClientConfiguration {
 	public void setKeyAsSegment(boolean keyAsSegment) {
 		this.keyAsSegment = keyAsSegment;
 	}
+	
+	@Advanced
+	@Field(comment = "Adding relations is done by default with a PUT command. If you enable this, a POST command will be used.")
+	public boolean isUsePostForRelations() {
+		return usePostForRelations;
+	}
+	public void setUsePostForRelations(boolean usePostForRelations) {
+		this.usePostForRelations = usePostForRelations;
+	}
+	
+	
 }

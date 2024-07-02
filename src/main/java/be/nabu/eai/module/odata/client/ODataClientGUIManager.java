@@ -28,6 +28,7 @@ import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.HTTPClient;
 import be.nabu.libs.http.core.DefaultHTTPRequest;
+import be.nabu.libs.http.core.HTTPRequestAuthenticatorFactory;
 import be.nabu.libs.odata.parser.ODataEntityConfiguration;
 import be.nabu.libs.odata.types.Function;
 import be.nabu.libs.property.api.Property;
@@ -37,6 +38,7 @@ import be.nabu.libs.resources.api.ManageableContainer;
 import be.nabu.libs.resources.api.ReadableResource;
 import be.nabu.libs.resources.api.Resource;
 import be.nabu.libs.resources.api.WritableResource;
+import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.types.base.ValueImpl;
 import be.nabu.libs.types.java.BeanInstance;
 import be.nabu.utils.io.IOUtils;
@@ -206,7 +208,7 @@ public class ODataClientGUIManager extends BaseJAXBGUIManager<ODataClientConfigu
 								}
 								WritableContainer<ByteBuffer> writable = ((WritableResource) child).getWritable();
 								try {
-									InputStream stream = getMetadata(instance, uri);
+									InputStream stream = instance.getMetadata(instance, uri, false);
 									try {
 										IOUtils.copyBytes(IOUtils.wrap(stream), writable);
 									}
@@ -261,40 +263,6 @@ public class ODataClientGUIManager extends BaseJAXBGUIManager<ODataClientConfigu
 		});
 	}
 
-	public InputStream getMetadata(ODataClient client, URI url) {
-		URI child = URIUtils.getChild(url, "$metadata");
-		HTTPClient httpClient = client.getParser().getHTTPClient();
-		HTTPRequest request = new DefaultHTTPRequest("GET", child.getPath(), new PlainMimeEmptyPart(null, 
-			new MimeHeader("Content-Length", "0"),
-			new MimeHeader("Accept", "application/xml"),
-			new MimeHeader("User-Agent", "User agent"),
-			new MimeHeader("Host", child.getHost())
-		));
-		// TODO: we could use the security here as well...?
-		// but this is client side, maybe we need to push this to server side?
-		try {
-			HTTPResponse response = httpClient.execute(request, null, child.getScheme().equals("https"), true);
-			if (response.getCode() >= 200 && response.getCode() < 300) {
-				if (response.getContent() instanceof ContentPart) {
-					ReadableContainer<ByteBuffer> readable = ((ContentPart) response.getContent()).getReadable();
-					return IOUtils.toInputStream(readable);
-				}
-				else {
-					throw new IllegalStateException("The response does not contain any content");
-				}
-			}
-			else {
-				throw new HTTPException(response.getCode());
-			}
-		}
-		catch (RuntimeException e) {
-			throw e;
-		}
-		catch (Exception e) {
-			throw new RuntimeException(e);
-		}
-	}
-	
 	@XmlRootElement(name = "expansions")
 	public static class ExpansionEditor {
 		private ODataClient instance;
