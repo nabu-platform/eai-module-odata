@@ -769,7 +769,7 @@ public class ODataRunner {
 	
 	// this is inspired by, copied from the jdbc code
 	
-	public static List<String> inputOperators = Arrays.asList("=", "<>", ">", "<", ">=", "<=", "like", "ilike");
+	public static List<String> inputOperators = Arrays.asList("=", "<>", ">", "<", ">=", "<=", "like", "ilike", "not like", "not ilike");
 	// if we have boolean operators, we check if there is a value
 	// if it is true, we apply the filter, if it is false, we apply the inverse filter, if it is null, we skip the filter
 	// if there is no value, the filter is applied
@@ -858,6 +858,11 @@ public class ODataRunner {
 					operator = "in";
 					inverse = true;
 				}
+			}
+			
+			if (operator.toLowerCase().equals("not like") || operator.toLowerCase().equals("not ilike")) {
+				operator = "like";
+				inverse = true;
 			}
 			
 			if (inverse && operator.toLowerCase().equals("is null")) {
