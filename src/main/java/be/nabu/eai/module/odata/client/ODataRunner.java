@@ -568,6 +568,9 @@ public class ODataRunner {
 						((JSONBinding) binding).setMarshalNonExistingRequiredFields(false);
 						// when we are using the odata.bind stuff, we need to be able to set raw values
 						((JSONBinding) binding).setAllowRaw(true);
+						// for PATCH services we want to explicitly set "null" values for optional fields if we mapped it
+						// TODO: might want to allow the user to set this explicitly for non-PATCH methods, e.g. in case of wrong method usage (PUT vs PATCH)
+						((JSONBinding) binding).setMarshalExplicitNullValues("PATCH".equalsIgnoreCase(function.getMethod()));
 					}
 	
 					// update the foreign keys
@@ -739,14 +742,16 @@ public class ODataRunner {
 								for (Object singleChild : (Iterable) childValue) {
 									content.set(child.getName() + "[" + counter++ + "]", "/" + collectionName + "(" + (singleChild instanceof String ? "'" : "") + singleChild + (singleChild instanceof String ? "'" : "") + ")");
 								}
-								// unset actual
-								content.set(linked.get(0).getName(), null);
+								// unset actual, we don't want it to end up in the json though!!!
+//								content.set(linked.get(0).getName(), null);
 							}
 							else if (childValue != null) {
 								content.set(child.getName(), "/" + collectionName + "(" + (childValue instanceof String ? "'" : "") + childValue + (childValue instanceof String ? "'" : "") + ")");
-								// unset actual
-								content.set(linked.get(0).getName(), null);
+								// unset actual, we don't want it to end up in the json though!!!
+//								content.set(linked.get(0).getName(), null);
 							}
+							// never allow the value to pass even if null?
+							content.delete(linked.get(0).getName());
 						}
 						// no support yet for lists of values!!
 						else if (linked.size() > 1) {
@@ -762,8 +767,10 @@ public class ODataRunner {
 										}
 										query += parts[1] + "=" + (newValue instanceof String ? "'" : "") + newValue + (newValue instanceof String ? "'" : "");
 										// unset actual
-										content.set(bindValue.getName(), null);
+//										content.set(bindValue.getName(), null);
 									}
+									// never allow the value to pass, even if null?
+									content.delete(bindValue.getName());
 								}
 							}
 							if (!query.isEmpty()) {
