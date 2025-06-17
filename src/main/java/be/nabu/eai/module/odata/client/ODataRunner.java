@@ -48,6 +48,7 @@ import be.nabu.libs.odata.parser.ODataEntityConfiguration;
 import be.nabu.libs.odata.types.Function;
 import be.nabu.libs.odata.types.NavigationProperty;
 import be.nabu.libs.property.ValueUtils;
+import be.nabu.libs.property.api.Value;
 import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.types.TypeUtils;
@@ -64,6 +65,7 @@ import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.json.JSONBinding;
 import be.nabu.libs.types.java.BeanInstance;
 import be.nabu.libs.types.java.BeanResolver;
+import be.nabu.libs.types.map.MapTypeGenerator;
 import be.nabu.libs.types.mask.MaskedContent;
 import be.nabu.libs.types.properties.AliasProperty;
 import be.nabu.libs.types.properties.CollectionNameProperty;
@@ -220,7 +222,7 @@ public class ODataRunner {
 				charset = Charset.forName("UTF-8");
 			}
 			// TODO: probably does not work for pure "containstarget", the absolute ids used for creating new associations do not take this into account
-			if ("MERGE-ASSOCIATIONS".equals(function.getMethod()) || "ADD-ASSOCIATIONS".equals(function.getMethod()) || "REMOVE-ASSOCIATIONS".equals(function.getMethod())) {
+			if ("MERGE-ASSOCIATIONS".equals(function.getMethod()) || "ADD-ASSOCIATIONS".equals(function.getMethod()) || "REMOVE-ASSOCIATIONS".equals(function.getMethod()) || "LIST-ASSOCIATIONS".equals(function.getMethod())) {
 				// typeEntity == function.getContext() -> the entitysetname
 				// navigation property -> boundIds alias
 				// entityId -> input 
@@ -229,6 +231,11 @@ public class ODataRunner {
 				
 				Element<?> boundIdsElement = function.getInput().get("boundIds");
 				Element<?> entityIdElement = function.getInput().get("entityId");
+				
+				// for lists it is in the output
+				if (boundIdsElement == null) {
+					boundIdsElement = function.getOutput().get("boundIds");
+				}
 				
 				String boundEntityCollection = ValueUtils.getValue(CollectionNameProperty.getInstance(), boundIdsElement.getProperties());
 				String navigationProperty = ValueUtils.getValue(AliasProperty.getInstance(), boundIdsElement.getProperties());
@@ -304,6 +311,85 @@ public class ODataRunner {
 					}
 					// we want to clear the boundids so they are marked for deletion
 					boundIds = new ArrayList();
+				}
+				else if ("LIST-ASSOCIATIONS".equals(function.getMethod())) {
+					Value<String> property = boundIdsElement.getProperty(ForeignKeyProperty.getInstance());
+					String primaryKeyField = property.getValue().split(":")[1];
+					ModifiablePart part = new PlainMimeEmptyPart(null, 
+						new MimeHeader("Content-Length", "0"),
+						new MimeHeader("Accept", "application/json"),
+						new MimeHeader("Host", definition.getHost())
+					);
+					String filter = input == null ? null : (String) input.get("filter");
+					List<Filter> filters = input == null ? null : (List<Filter>) input.get("filters");
+					// if you didn't set an explicit filter, you might have used the filters array
+					if (filter == null && filters != null && !filters.isEmpty()) {
+						filter = buildFilter(filters);
+					}
+					// the "ref" list returns URLs to the entities, it is however not easy to consistently extract the ids of said entities from these urls
+					// instead we do a "regular" list and extract the primary key from the resultset
+					listTarget = listTarget.replaceAll("/\\$ref$", "");
+					if (filter != null && !filter.trim().isEmpty()) {
+						listTarget += "?$filter=" + URIUtils.encodeURL(filter);
+					}
+					DefaultHTTPRequest request = new DefaultHTTPRequest("GET", listTarget, part);
+					HTTPResponse response = run((String) transactionId, request);
+					JSONBinding binding = new JSONBinding(new MapTypeGenerator(), charset);
+					binding.setAddDynamicElementDefinitions(true);
+					binding.setAllowDynamicElements(true);
+					ReadableContainer<ByteBuffer> readable = ((ContentPart) response.getContent()).getReadable();
+					if (readable != null) {
+						try {
+							ComplexContent unmarshalled = binding.unmarshal(IOUtils.toInputStream(readable), new Window[0]);
+							/**
+							 * we expect the "value" attribute to contain a list of entities, in our usecase the definition stated a low level directoryObject as result type and at runtime the actual extension type as passed in as @odata.type
+							 * however, the low level type correctly identified the "id" field as primary key so it is easier to extract this way:
+							 * 
+							 * {
+								    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#directoryObjects",
+								    "value": [
+								        {
+								            "@odata.type": "#microsoft.graph.user",
+								            "id": "97cd6538-d5dc-4b01-8a56-773b03caece4",
+								            "businessPhones": [],
+								          ...
+								          
+							 * The $ref version returned this: {
+								    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#directoryObjects",
+								    "value": [
+								        {
+								            "@odata.id": "https://graph.microsoft.com/v2/e2420cec-6a11-44aa-8c75-78da8b7e7a9d/directoryObjects/97cd6538-d5dc-4b01-8a56-773b03caece4/Microsoft.DirectoryServices.User"
+								        },
+								        {
+								            "@odata.id": "https://graph.microsoft.com/v2/e2420cec-6a11-44aa-8c75-78da8b7e7a9d/directoryObjects/b81a6be1-210a-442a-834b-90cde4623a08/Microsoft.DirectoryServices.User"
+								        },
+								        {
+								            "@odata.id": "https://graph.microsoft.com/v2/e2420cec-6a11-44aa-8c75-78da8b7e7a9d/directoryObjects/e36c3567-81df-4ca0-83e7-83a7680dd61b/Microsoft.DirectoryServices.User"
+								        },
+								        {
+								            "@odata.id": "https://graph.microsoft.com/v2/e2420cec-6a11-44aa-8c75-78da8b7e7a9d/directoryObjects/dec22cd6-1d15-483d-a7e0-bafea34f72f1/Microsoft.DirectoryServices.User"
+								        }
+								    ]
+								}
+							 */
+							if (unmarshalled != null && unmarshalled.get("value") instanceof List) {
+								for (Object single : (List) unmarshalled.get("value")) {
+									if (single instanceof ComplexContent) {
+										Object object = ((ComplexContent) single).get(primaryKeyField);
+										if (object != null) {
+											boundIds.add(object);
+										}
+									}
+								}
+							}
+						}
+						finally {
+							readable.close();
+						}
+						ComplexContent listOutput = function.getOutput().newInstance();
+						listOutput.set("boundIds", boundIds);
+						return listOutput;
+					}
 				}
 				
 				List<DefaultHTTPRequest> requests = new ArrayList<DefaultHTTPRequest>();
