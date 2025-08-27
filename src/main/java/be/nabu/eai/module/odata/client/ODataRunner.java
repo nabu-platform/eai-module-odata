@@ -722,7 +722,8 @@ public class ODataRunner {
 					if (readable != null) {
 						try {
 							UnmarshallableBinding unmarshallable = null;
-	
+							// whether the returned instance from the binding is the root itself of the output or a child within
+							boolean isRootOutputBinding = false;
 							boolean isListBinding = false;
 							String resultName = null;
 							ComplexType result = null;
@@ -749,10 +750,16 @@ public class ODataRunner {
 								((JSONBinding) unmarshallable).setIgnoreUnknownElements(true);
 							}
 							
+							if (unmarshallable == null) {
+								unmarshallable = new JSONBinding(function.getOutput(), charset);
+								((JSONBinding) unmarshallable).setIgnoreUnknownElements(true);
+								isRootOutputBinding = true;
+							}
+							
 							if (unmarshallable != null) {
 								ComplexContent unmarshal = unmarshallable.unmarshal(IOUtils.toInputStream(readable), new Window[0]);
 								// we did the list one, so it _is_ the output
-								if (isListBinding) {
+								if (isListBinding || isRootOutputBinding) {
 									return unmarshal;
 								}
 								else {
@@ -761,7 +768,6 @@ public class ODataRunner {
 									return newInstance;
 								}
 							}
-							return null;
 						}
 						finally {
 							readable.close();
