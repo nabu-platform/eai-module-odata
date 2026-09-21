@@ -87,6 +87,16 @@ public class ODataClientService implements DefinedService, ExternalDependencyArt
 							new ValueImpl<Integer>(MinOccursProperty.getInstance(), 0),
 							new ValueImpl<Integer>(MaxOccursProperty.getInstance(), 0)));
 					}
+					if ("PATCH".equalsIgnoreCase(function.getMethod())) {
+						if (extended == null) {
+							extended = new Structure();
+							extended.setName("input");
+							extended.setSuperType(input);
+						}
+						input = extended;
+						extended.add(new SimpleElementImpl<Boolean>("upsert", SimpleTypeWrapperFactory.getInstance().getWrapper().wrap(Boolean.class), extended,
+							new ValueImpl<Integer>(MinOccursProperty.getInstance(), 0)));
+					}
 					List<String> pathParameters = client.getPathParameters();
 					if (pathParameters != null && !pathParameters.isEmpty()) {
 						if (extended == null) {

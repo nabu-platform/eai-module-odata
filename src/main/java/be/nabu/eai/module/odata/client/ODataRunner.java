@@ -157,6 +157,7 @@ public class ODataRunner {
 	public ComplexContent run(Function function, ComplexContent input) {
 		try {
 			Object transactionId = input == null ? null : input.get("transactionId");
+			Boolean upsert = input == null ? null : (Boolean) input.get("upsert");
 			
 			String target = definition.getBasePath();
 			
@@ -686,7 +687,7 @@ public class ODataRunner {
 				// maybe in the future we'll annotate the instances etc, but for now we leave it like this
 				// the star is a special syntax indicating that we don't really care what the current version is, we just want to update it
 				if ("PUT".equalsIgnoreCase(function.getMethod()) || "DELETE".equalsIgnoreCase(function.getMethod()) || "PATCH".equalsIgnoreCase(function.getMethod())) {
-					if (!client.getConfig().isIgnoreEtag()) {
+					if (!client.getConfig().isIgnoreEtag() && !Boolean.TRUE.equals(upsert)) {
 						part.setHeader(new MimeHeader("If-Match", "*"));
 					}
 				}
